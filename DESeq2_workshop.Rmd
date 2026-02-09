@@ -1,22 +1,56 @@
 ---
 title: "ML_DESeq2_workshop"
 output:
-  pdf_document: default
   html_document: default
-date: "2023-02-07"
+  pdf_document: default
+date: "2026-02-09"
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## DESeq2 workshop
-The following pipeline is based on DESeq2 vignette by Love et al. found here: http://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#data-quality-assessment-by-sample-clustering-and-visualization
+## DESeq2 Workshop - Machine Learning in Practice
 
-The data used in the vignette and that we will be using is from an experiment on Drosophila melanogaster cell cultures and investigation of the effect of RNAi knock-down of the splicing factor pasilla (Brooks et al. 2011). 
+Welcome to this practical workshop on analyzing bulk RNA-seq data using DESeq2. This tutorial demonstrates how the machine learning concepts we've discussed today are applied in real bioinformatics workflows.
 
-# Loading the packages
-The first thing, is to load the required packages.
+### Workshop Overview
+
+In this workshop, we will apply several ML tools to analyze RNA-sequencing data:
+
+- **Data transformation** with Variance Stabilizing Transformation (VST) to make data suitable for PCA and clustering
+- **PCA** for quality control, visualizing sample relationships, and checking for batch effects
+- **Hierarchical clustering** on gene expression heatmaps to identify clustering of genes and samples
+- **Statistical testing** with DESeq2 for differentially expressed genes (based on generalized linear models)
+- **Visualization** of the results with volcano plots and heatmaps
+
+### Getting Started
+
+Please download the DESeq2_workshop.Rmd from GitHub (<https://github.com/GustawEriksson/Machine_Learning_introduction_2023>) and open it in RStudio.
+
+If R and RStudio are not installed:
+- Install R from: <https://www.r-project.org/>
+- Install RStudio from: <https://posit.co/download/rstudio-desktop/>
+
+After opening DESeq2_workshop.Rmd, install BiocManager (done automatically) and the required packages by changing the `install.packages.flag` from TRUE to FALSE.
+
+Thereafter, run all the code sections to generate output.
+
+### About DESeq2
+
+DESeq2 is the most widely used method for analyzing bulk RNA-sequencing data. Other methods include limma and edgeR, but all share the common aim of identifying differentially expressed genes (and can be extended to proteins, lipids, etc.).
+
+For a comprehensive introduction, see the excellent DESeq2 vignette: <http://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html>
+
+### The Dataset
+
+The data used in this vignette is from an experiment on *Drosophila melanogaster* cell cultures investigating the effect of RNAi knock-down of the splicing factor pasilla (Brooks et al. 2011). This is a classic dataset perfect for learning the DESeq2 workflow.
+
+---
+
+# Loading the Packages
+
+The first thing is to load the required packages.
 
 ```{r, echo=FALSE}
 
@@ -27,7 +61,7 @@ if (install.packages.flag == TRUE) {
   BiocManager::install(c("tximport", "readr", "tximportData",
                        "pasilla", "DESeq2", "vsn", "pheatmap",
                        "RColorBrewer", "ggplot2", "apeglm", 
-                       "EnchancedVolcano"))
+                       "EnhancedVolcano"))
 }
 
 library("tximport")
@@ -44,8 +78,9 @@ library("EnhancedVolcano")
 
 ```
 
-## Importing the data and generating the DESeq dataset
-DESeq2 allows for a quick and easy import of test data
+## Importing the Data and Generating the DESeq Dataset
+
+DESeq2 allows for quick and easy import of test data. We'll load the pasilla dataset that comes with the package.
 
 ```{r, echo=FALSE}
 pasCts <- system.file("extdata",
@@ -61,108 +96,165 @@ coldata$condition <- factor(coldata$condition)
 coldata$type <- factor(coldata$type)
 ```
 
-We look at the countmatrix (cts) and the column data i.e. data groups
+Let's examine the count matrix (cts) and the column data (i.e., sample metadata/groups):
+
 ```{r}
 head(cts,10)
+nrow(cts)
 ```
+
 ```{r}
 coldata
 ```
-Note that these are not in the same order with respect to samples!
 
-It is absolutely critical that the columns of the count matrix and the rows of the column data are in the same order. D
+**Important Note:** The samples are not in the same order in the count matrix and metadata!
 
-As they are not in the correct order as given, we need to re-arrange one or the other so that they are consistent in terms of sample order (if we do not, later functions would produce an error). We additionally need to chop off the "fb" of the row names of coldata, so the naming is consistent.
+It is **absolutely critical** that the columns of the count matrix and the rows of the column data are in the same order. If they are not in the correct order, we need to re-arrange one or the other so that they are consistent in terms of sample order (if we do not, later functions would produce an error). We additionally need to chop off the "fb" prefix from the row names of coldata to make the naming consistent.
 
 ```{r}
 rownames(coldata) <- sub("fb", "", rownames(coldata))
 all(rownames(coldata) %in% colnames(cts))
 ```
+
 ```{r}
 all(rownames(coldata) == colnames(cts))
 ```
+
 ```{r}
 cts <- cts[, rownames(coldata)]
 all(rownames(coldata) == colnames(cts))
 ```
-The countmatrix is now in order and we can generate the DESeq dataset
+
+Let us look at the formatted cts and coldata
+
+```{r}
+head(cts,10)
+nrow(cts)
+```
+```{r}
+coldata
+```
+
+The count matrix is now in the correct order, and we can generate the DESeq dataset object:
+
 ```{r}
 dds <- DESeqDataSetFromMatrix(countData = cts,
                               colData = coldata,
                               design = ~ condition)
 dds
 ```
-## Prefiltering the data
-It is not required to prefilter the data, but it is a good habit. It reduces the memory and thus the computing time, but it can also help in visualisation by removing "noise".
+
+## Prefiltering the Data
+
+While not strictly required, prefiltering is good practice. It reduces memory usage and computing time, and can also help in visualization by removing "noise" from genes with very low counts.
 
 ```{r}
 keep <- rowSums(counts(dds)) >= 10
 dds <- dds[keep,]
+dds
 ```
 
-## Setting factor levels
-R chooses the reference when performing differential gene expression analysis by alphabetic order. Therefore, one should set the factor level manually
+## Setting Factor Levels
+
+R chooses the reference level for differential gene expression analysis by alphabetical order. Therefore, you should set the factor level manually to ensure the comparison is in the direction you want (treated vs. untreated, not untreated vs. treated).
+
 ```{r}
 dds$condition <- factor(dds$condition, levels = c("untreated","treated"))
 ```
 
-## Data transformation and visualisation
-The differential gene expression analysis is done on raw counts. However, for some visualisation, transformed data has to be used. Transformed data implies scaled data. The most common method is logtransform, but other methods are available which are shown below. 
+## Data Transformation and Visualization
 
-The point of the two demonstrated transformations, the VST and the rlog, is to remove the dependence of the variance on the mean, particularly the high variance of the logarithm of count data when the mean is low. Both VST and rlog use the experiment-wide trend of variance over mean, in order to transform the data to remove the experiment-wide trend.
+**Important:** Differential gene expression analysis is performed on **raw counts**. However, for visualization and some quality control steps, we need to use **transformed data**.
+
+### Why Transform?
+
+Raw count data has variance that depends on the mean - genes with higher expression have higher variance. This heteroscedasticity can make visualization and clustering misleading. The transformations below stabilize the variance across the range of expression levels.
+
+### Transformation Methods
+
+We'll demonstrate three transformation methods:
+
+1. **normTransform** - Simple log2(n+1) transformation with pseudocount
+2. **VST** (Variance Stabilizing Transformation) - Stabilizes variance across mean
+3. **rlog** (Regularized log transformation) - Similar to VST but more robust for small sample sizes
+
+The point of VST and rlog is to remove the dependence of variance on the mean, particularly the high variance of log-transformed count data when the mean is low. Both use the experiment-wide trend of variance over mean to transform the data and remove this trend.
+
+**For most applications with moderate to large sample sizes (n ≥ 30), VST is recommended as it's faster than rlog.**
 
 ```{r, echo=FALSE}
 ntd <- normTransform(dds) # Log2(n+1), log2 with pseudocount 1
-vsd <- vst(dds, blind=FALSE) #variance stabilizing transformation
-rld <- rlog(dds, blind=FALSE) # regularized log transformation
+vsd <- vst(dds, blind=FALSE) # Variance stabilizing transformation
+rld <- rlog(dds, blind=FALSE) # Regularized log transformation
 head(assay(vsd), 3)
+head(assay(dds), 3)
 ```
 
-Plotting the standard deviation of transformed data across all samples against the mean. Observe that the variance differ between the methods. In VST, the variance is stable across
+Let's visualize how well each transformation stabilizes variance by plotting the standard deviation of transformed data across all samples against the mean:
 
 ```{r}
 meanSdPlot(assay(ntd))
-1
 ```
+
 ```{r}
 meanSdPlot(assay(vsd))
 ```
+
 ```{r}
 meanSdPlot(assay(rld))
 ```
 
+**Observation:** In VST and rlog, the variance is stable across the range of mean expression values, which is ideal for downstream visualization and clustering methods.
 
+## Quality Control by Sample Clustering and Visualization
 
-## Quality control by sample clustering and visaulization
-Data quality assessment and quality control (i.e. the removal of insufficiently good data) are essential steps of any data analysis. These steps should typically be performed very early in the analysis of a new data set, preceding or in parallel to the differential expression testing.
+Data quality assessment and quality control (i.e., the removal of insufficiently good data) are essential steps of any data analysis. These steps should typically be performed very early in the analysis of a new dataset, preceding or in parallel to the differential expression testing.
 
-We define the term quality as fitness for purpose. Our purpose is the detection of differentially expressed genes, and we are looking in particular for samples whose experimental treatment suffered from an anormality that renders the data points obtained from these particular samples detrimental to our purpose.
+### Quality as Fitness for Purpose
 
-We will generate three heatmaps. First, we select the top 50 expressed genes by the mean expression across all samples
+We define the term **quality** as **fitness for purpose**. Our purpose is the detection of differentially expressed genes, and we are looking in particular for samples whose experimental treatment suffered from an abnormality that renders the data points obtained from these particular samples detrimental to our purpose.
+
+### Hierarchical Clustering with Heatmaps
+
+Hierarchical clustering groups similar data points into clusters and is commonly used to visualize gene expression patterns in heatmaps. The clustering creates a dendrogram where:
+- **Long branches** indicate dissimilar samples/genes
+- **Short branches** indicate similar samples/genes
+
+We will generate several heatmaps to assess data quality. First, let's select the top 50 most highly expressed genes by mean expression across all samples:
+
 ```{r}
 select <- order(rowMeans(counts(dds,normalized=FALSE)),
                 decreasing=TRUE)[1:50]
 df <- as.data.frame(colData(dds)[,c("condition","type")])
 ```
 
-The first heatmap is without any clustering of the data
+**Heatmap 1:** Without clustering (original order)
+
 ```{r}
 pheatmap(assay(vsd)[select,], cluster_rows=FALSE, show_rownames=FALSE,
          cluster_cols=FALSE, annotation_col=df)
 ```
-For the second, we test with hiearchical clustering
+
+**Heatmap 2:** With hierarchical clustering
+
 ```{r}
 pheatmap(assay(vsd)[select,], cluster_rows=TRUE, show_rownames=FALSE,
          cluster_cols=TRUE, annotation_col=df)
 ```
-Lets compare with non-transformed data i.e. only log2 transformed
+
+**Heatmap 3:** Comparing with simple log2 transformation (no variance stabilization)
+
 ```{r}
 pheatmap(assay(ntd)[select,], cluster_rows=TRUE, show_rownames=FALSE,
          cluster_cols=TRUE, annotation_col=df)
 ```
-In this case, the data is not that different...
 
-For the sake of fun, let us do one massive heatmap
+In this case, the data is not dramatically different between transformations, but with real datasets with more noise, the difference can be substantial.
+
+### Larger Heatmap
+
+For fun, let's generate a heatmap with the top 500 genes:
+
 ```{r}
 select_500 <- order(rowMeans(counts(dds,normalized=FALSE)),
                 decreasing=TRUE)[1:500]
@@ -170,26 +262,72 @@ pheatmap(assay(vsd)[select_500,], cluster_rows=TRUE, show_rownames=FALSE,
          cluster_cols=TRUE, annotation_col=df)
 ```
 
-We can also play around with the kmeans to define the number of clusters to generate
+### K-means Clustering in Heatmaps
+
+We can also use **K-means clustering** to group genes into a predefined number of clusters (K). K-means groups similar genes together before generating the heatmap, which can help identify patterns.
+
+**Reminder:** K-means clustering is an unsupervised ML method that:
+1. Creates K random centroids
+2. Assigns each data point to the closest centroid
+3. Recalculates centroids
+4. Repeats until convergence
+
+To set the number of K's to use, let us first generate a Elbow plot
+
 ```{r}
 select_500 <- order(rowMeans(counts(dds,normalized=FALSE)),
                 decreasing=TRUE)[1:500]
-Set_K = 10
+
+# Extract the expression matrix: transpose so genes become rows for kmeans
+gene_matrix_t <- t(assay(vsd)[select_500,])
+
+# Test K values from 1 to 10
+k_values <- 1:10
+distortions <- numeric(length(k_values))
+
+# Calculate distortions for clustering GENES
+set.seed(123)
+for (i in k_values) {
+  # Cluster the genes (columns of original, rows after transpose)
+  kmeans_result <- kmeans(t(gene_matrix_t), centers = i, nstart = 25)
+  distortions[i] <- kmeans_result$tot.withinss
+}
+
+# Scale distortions (divide by 1000)
+distortions_scaled <- distortions / 1000
+
+# Create the elbow plot
+plot(k_values, distortions_scaled, type = "b", pch = 19, 
+     xlab = "k", 
+     ylab = "Distortions",
+     main = "The Elbow Method showing the optimal k",
+     col = "blue", lwd = 2, cex = 1.2)
+grid()
+
+```
+
+```{r}
+Set_K = 3
 pheatmap(assay(vsd)[select_500,], cluster_rows=TRUE, show_rownames=FALSE,
          cluster_cols=TRUE, annotation_col=df, kmeans_k = Set_K)
 ```
 
-By setting the Kmeans, the rows are aggregated before generating the heatmap
+By setting K-means, the rows (genes) are aggregated into N clusters before generating the heatmap, making it easier to see groups of genes with similar expression patterns.
 
-Another way to determine whether the samples are similar or not, is to calculate the euclidean distances between the samples and store the values in a distance matrix which then can be visualised
+### Sample Distance Matrix
+
+Another way to assess sample similarity is to calculate Euclidean distances between samples and visualize them in a distance matrix heatmap.
+
+**Reminder:** Euclidean distance is also used in K-nearest neighbors (KNN) classification to determine similarity between data points.
 
 Calculating the distances:
+
 ```{r}
 sampleDists <- dist(t(assay(vsd)), method = "euclidean")
 head(sampleDists)
 ```
 
-And plotting it:
+Plotting the distance matrix:
 
 ```{r}
 sampleDistMatrix <- as.matrix(sampleDists)
@@ -202,13 +340,31 @@ pheatmap(sampleDistMatrix,
          col=colors)
 ```
 
-We leave the best to last, which is the PCA loved by most.
+Darker blue indicates smaller distances (more similar samples), while lighter colors indicate larger distances (more dissimilar samples).
+
+### Principal Component Analysis (PCA)
+
+We leave the best for last - **PCA**, loved by most bioinformaticians!
+
+**PCA Refresher:**
+- PCA is a dimensionality reduction technique that summarizes high-dimensional data (thousands of genes) into a smaller number of dimensions (typically 2 for visualization)
+- **PC1** (Principal Component 1) explains the most variance in the data
+- **PC2** explains the second most variance, and is perpendicular to PC1
+- Each PC is a linear combination of all genes, with different genes having different "loadings" (weights/contributions)
+- The loadings are eigenvectors of the covariance matrix
+- PCA is commonly used in transcriptomics, proteomics, lipidomics, metabolomics, and other -omics fields for quality control
+
+**Key questions PCA helps answer:**
+- Do replicates cluster together?
+- Do experimental conditions separate?
+- Is there a batch effect?
 
 ```{r}
 plotPCA(vsd, intgroup=c("condition", "type"))
 ```
 
-The PCA plot can be further customised with ggplot
+The PCA plot can be further customized with ggplot2:
+
 ```{r}
 pcaData <- plotPCA(vsd, intgroup=c("condition", "type"), returnData=TRUE)
 percentVar <- round(100 * attr(pcaData, "percentVar"))
@@ -219,10 +375,27 @@ ggplot(pcaData, aes(PC1, PC2, color=condition, shape=type)) +
   coord_fixed()
 ```
 
-The data looks good. The majority of the variance is shown in PC1 in which we see that the data cluster based on the condition untreated or not. PC2 is explained by the technical difference, being sequence either paired-end or single-read.
+**Interpretation:**
 
-## Differential gene expression analysis
-Differential expression analysis based on the Negative Binomial (a.k.a. Gamma-Poisson) distribution, further described in the DESeq2 publication (Love, Huber, and Anders 2014).
+The data looks good! The majority of the variance is captured in PC1, where we see that samples cluster based on the experimental condition (untreated vs. treated). PC2 captures the technical difference between paired-end and single-read sequencing.
+
+This is exactly what we want to see:
+- **Biological variation (treatment effect)** is the dominant source of variance (PC1)
+- **Technical variation (sequencing type)** is a secondary source (PC2)
+- Replicates from the same condition cluster together
+
+## Differential Gene Expression Analysis
+
+Now we move to the main analysis: identifying differentially expressed genes using DESeq2.
+
+### The DESeq2 Statistical Model
+
+DESeq2 uses a **generalized linear model (GLM)** based on the Negative Binomial distribution (also known as Gamma-Poisson distribution). This model is well-suited for count data and accounts for:
+- Mean-variance relationship in count data
+- Differences in sequencing depth between samples
+- Biological variability
+
+For more details, see the DESeq2 publication (Love, Huber, and Anders 2014).
 
 ```{r}
 dds <- DESeq(dds)
@@ -230,29 +403,42 @@ res <- results(dds)
 res
 ```
 
-Shrinkage of effect size (LFC estimates) is useful for visualization and ranking of genes. To shrink the LFC, we pass the dds object to the function lfcShrink. Below we specify to use the apeglm method for effect size shrinkage (Zhu, Ibrahim, and Love 2018), which improves on the previous estimator.
+### Log Fold Change Shrinkage
 
-Apeglm is based on a generalised linear model. It provides Bayesian shrinkage estimators for effect sizes for a variety of GLM models, using approximation of the posterior for individual coefficients.
+Raw log fold change (LFC) estimates can have high variance, especially for genes with low counts. **Shrinkage** helps by pulling unreliable LFC estimates toward zero, improving visualization and gene ranking.
 
-We provide the dds object and the name or number of the coefficient we want to shrink, where the number refers to the order of the coefficient as it appears in resultsNames(dds).
+**Apeglm Method:**
+- Based on a generalized linear model
+- Provides Bayesian shrinkage estimators
+- Uses approximation of the posterior for individual coefficients
+- Has lower bias than previous estimators while still reducing variance
+
+We specify the apeglm method for effect size shrinkage (Zhu, Ibrahim, and Love 2018):
 
 ```{r}
 resLFC <- lfcShrink(dds, coef="condition_treated_vs_untreated", type="apeglm")
 resLFC
 ```
 
-We can extract the number of differentially expressed genes and summarise the results:
+### Extracting and Summarizing Results
+
+Let's extract the most significant differentially expressed genes:
+
 ```{r}
 resOrdered <- res[order(res$padj),]
 head(resOrdered, 10)
 ```
+
+Summary of results at adjusted p-value < 0.1:
+
 ```{r}
 summary(res)
 print("Number of DEGs:")
 sum(res$padj < 0.1, na.rm=TRUE)
 ```
 
-The parameters can also be adjusted to show adjusted p-value of 0.05
+The parameters can also be adjusted to use adjusted p-value of 0.05:
+
 ```{r}
 res05 <- results(dds, alpha=0.05)
 summary(res05)
@@ -260,45 +446,125 @@ print("Number of DEGs:")
 sum(res05$padj < 0.05, na.rm=TRUE)
 ```
 
-Comparing the results to the LFC shrinken
+Comparing to the LFC-shrunken results:
+
 ```{r}
 summary(resLFC)
 print("Number of DEGs:")
 sum(resLFC$padj < 0.05, na.rm=TRUE)
 ```
 
-At adjusted p-value 0.1, there are no differences in number of DEG's. But as we lower the cutoff, there is.
+At adjusted p-value 0.1, there are no differences in the number of DEGs between shrunken and non-shrunken results. However, as we lower the cutoff, differences emerge.
 
-The non shrunken data and shrunken can also be compared visually to further explain what shrinkage does:
+### Visualizing the Effect of Shrinkage
+
+The non-shrunken and shrunken data can be compared visually using MA plots (M = log ratio, A = mean average):
+
+**Without shrinkage:**
 ```{r}
 plotMA(res, ylim=c(-2,2))
 ```
+
+**With shrinkage:**
 ```{r}
 plotMA(resLFC, ylim=c(-2,2))
 ```
 
-From the APEGLM paper: 
-"When the read counts are low or highly variable, the maximum likelihood estimates for the LFCs has high variance, leading to large estimates not representative of true differences, and poor ranking of genes by effect size. One approach is to introduce filtering thresholds and pseudocounts to exclude or moderate estimated LFCs. Filtering may result in a loss of genes from the analysis with true differences in expression, while pseudocounts provide a limited solution that must be adapted per dataset.[...]
-The proposed method, Approximate Posterior Estimation for generalized linear model, apeglm, has lower bias than previously proposed shrinkage estimators, while still reducing variance for those genes with little information for statistical inference."
+**Observation:** In the shrunken plot, you can see that LFC estimates for genes with low mean expression (left side of the plot) are pulled toward zero, while high-confidence estimates (high expression genes) remain largely unchanged.
 
-Lets do a heatmap of our top 50 differentially expressed genes based on padj, showing genes with a padj <= 0.05
+### Understanding Shrinkage
+
+From the APEGLM paper:
+
+> "When the read counts are low or highly variable, the maximum likelihood estimates for the LFCs has high variance, leading to large estimates not representative of true differences, and poor ranking of genes by effect size. One approach is to introduce filtering thresholds and pseudocounts to exclude or moderate estimated LFCs. Filtering may result in a loss of genes from the analysis with true differences in expression, while pseudocounts provide a limited solution that must be adapted per dataset. [...] The proposed method, Approximate Posterior Estimation for generalized linear model (apeglm), has lower bias than previously proposed shrinkage estimators, while still reducing variance for those genes with little information for statistical inference."
+
+### Heatmap of Top Differentially Expressed Genes
+
+Let's visualize the top 100 differentially expressed genes with hierarchical clustering:
+
 ```{r}
 
 #resLFC <- resLFC[!is.na(resLFC$padj),]
 #DE.genes = rownames(resLFC[resLFC$padj < .05 & abs(resLFC$log2FoldChange) > 1,])
 
 resOrdered.LFC <- resLFC[order(resLFC$padj, decreasing = FALSE),]
-resOrdered.LFC.genes = rownames(resOrdered.LFC)[1:50]
+resOrdered.LFC.genes = rownames(resOrdered.LFC)[1:100]
 
 pheatmap(assay(vsd)[resOrdered.LFC.genes,], cluster_rows=TRUE, show_rownames=FALSE,
          cluster_cols=TRUE, annotation_col=df)
 
 ```
 
-We can also visualize the DEG's with a Volcano plot
+This heatmap clearly shows:
+- Hierarchical clustering reveals groups of genes with similar expression patterns
+- Samples cluster by experimental condition
+- Some genes are upregulated in treated samples (red/yellow), while others are downregulated (blue)
+
+### Volcano Plot
+
+Finally, let's visualize all DEGs with a volcano plot, which shows both statistical significance (y-axis) and effect size (x-axis):
+
 ```{r}
 EnhancedVolcano(res,
     lab = rownames(res),
     x = 'log2FoldChange',
     y = 'pvalue')
 ```
+
+The volcano plot makes it easy to identify the most significant and biologically relevant genes:
+- Points in the upper corners are both statistically significant and have large fold changes
+- Points in the middle top are significant but have small effect sizes
+- Points at the bottom are not significant
+
+## Connecting to Machine Learning Concepts
+
+Throughout this tutorial, we've applied several ML concepts:
+
+1. **Unsupervised Learning:**
+   - K-means clustering for grouping genes
+   - Hierarchical clustering for creating dendrograms
+   - PCA for dimensionality reduction and visualization
+
+2. **Supervised Learning:**
+   - Generalized Linear Models (GLMs) in the DESeq2 statistical test
+   - Similar to linear/logistic regression concepts we discussed
+
+3. **Validation:**
+   - Quality control with PCA and clustering
+   - Multiple testing correction (adjusted p-values)
+   - Shrinkage to reduce overfitting of LFC estimates
+
+### ML Applications in RNA-seq
+
+The ML concepts we've covered today have broader applications in transcriptomics:
+
+- **Linear/Logistic Regression:** Studying gene expression relationships to clinical variables 
+- **KNN:** Cell type classification in single-cell RNA-seq (used in Leiden clustering)
+- **Random Forest:** Disease prediction using gene expression and clinical variables
+- **Consensus Clustering:** Subtyping diseases based on gene expression patterns
+
+## Summary and Next Steps
+
+Congratulations! You've completed a full DESeq2 analysis workflow, applying:
+
+- Data preprocessing and quality control
+- Variance-stabilizing transformation
+- Unsupervised ML (PCA, hierarchical clustering, K-means)
+- Statistical testing with GLMs
+- Visualization and interpretation
+
+### For Further Learning
+
+- **DESeq2 Vignette:** <http://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html>
+- **StatQuest YouTube:** Excellent tutorials on ML and statistics, including PCA: <https://www.youtube.com/watch?v=FgakZw6K1QQ>
+- **The GitHub:** Additional bioinformatics tutorials and projects: <https://github.com/GustawEriksson/Machine_Learning_introduction_2023>
+
+### Questions?
+
+Feel free to explore the code, modify parameters, and experiment with different visualizations. Machine learning is best learned by doing!
+
+---
+
+**Workshop created by:** Gustaw Eriksson (gustaw.eriksson@ki.se)  
+**Date:** February 9, 2026  
+**Affiliation:** Reproductive Endocrinology and Metabolism Group, Karolinska Institutet
