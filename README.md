@@ -12,7 +12,7 @@
             \/                  \/                        \/     \/             \/     \/   
   
 
-# Machine Learning Introduction 2023
+# Machine Learning Introduction
 ## By Gustaw Eriksson, gustaw.eriksson@ki.se
 A quick and dirty run of the DESeq2 vignette on the parsilla dataset. Please download the DESeq2_workshop.Rmd and open it in RStudio. If you do not want to run the code, you can download either the .html or .pdf file to see the code and output without running it yourself.
 
